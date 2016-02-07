@@ -1,0 +1,5 @@
+aws.host: <HOST, e.g.: s3.eu-central-1.amazonaws.com>
+aws.key_id: <KEY_ID>
+aws.key: <KEY>
+local.folder: <FOLDER, e.g.: D:/opens3box>
+remote.bucket: <BUCKET>
