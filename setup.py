@@ -9,4 +9,4 @@ for site_path in site.getsitepackages():
     if os.path.isdir(pywin32_path):
         os.environ["PATH"] = os.environ["PATH"] + ";" + pywin32_path
 
-setup(console=['opens3box.py'])
+setup(console=['src/opens3box.py'])
