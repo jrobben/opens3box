@@ -1,6 +1,9 @@
 import os
+import sys
 from distutils.core import setup
 import py2exe
+
+sys.path.append("src")
 
 # Fix for: pywintypes27.dll not found
 import site
@@ -9,4 +12,8 @@ for site_path in site.getsitepackages():
     if os.path.isdir(pywin32_path):
         os.environ["PATH"] = os.environ["PATH"] + ";" + pywin32_path
 
-setup(console=['src/opens3box.py'])
+setup(console=['src/opens3box.py'],
+options={
+'py2exe': {'includes': ['tray']},
+}   
+)

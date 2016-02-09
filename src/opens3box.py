@@ -6,13 +6,14 @@ import time
 from hashlib import md5
 from calendar import timegm
 from IPython import embed
+from tray import SysTrayIcon
 
 def error(msg):
     print "ERROR:", msg
     
 def info(msg):
     # TODO use logging module
-    pass # print" INFO:", msg
+    print" INFO:", msg
     
 def fatal_error(msg):
     error(msg)
@@ -23,7 +24,10 @@ def md5sum(filename):
         return md5(f.read()).hexdigest()
         
 def modified_time(key):
-    return timegm(time.strptime(key.last_modified, "%a, %d %b %Y %H:%M:%S %Z"))
+    try:
+        return timegm(time.strptime(key.last_modified, "%a, %d %b %Y %H:%M:%S %Z"))
+    except ValueError:
+        return timegm(time.strptime(key.last_modified[:19], "%Y-%m-%dT%H:%M:%S"))
     
 def ensure_folder(folder):
     if not os.path.exists(folder):  
@@ -57,6 +61,13 @@ class OpenS3Box:
     def remote_to_local_path(self, key):
         return os.path.join(self.local_folder, key.name.replace("/", os.sep))
         
+    def download(self, key, local_path):
+       try:
+            key.get_contents_to_filename(local_path)
+       except Exception, e:
+            embed()
+            error("Failed to update {}, {}".format(local_path, str(e)))
+        
     def sync(self):
         # TODO add caching: md5sum/data modified/...
         # Download new or modified files
@@ -67,10 +78,14 @@ class OpenS3Box:
 
             if not os.path.isfile(local_path):
                 info("Downloading new file {}".format(local_path))
-                key.get_contents_to_filename(local_path)
+                self.download(key, local_path)
             elif md5sum(local_path) != key.etag[1:-1]:
-                if os.path.getmtime(local_path) < modified_time(key):
-                    key.get_contents_to_filename(local_path)
+                print md5sum(local_path), key.etag[1:-1]
+                if os.path.getmtime(local_path) < modified_time(key):                    
+                    info("Downloading updated file {}".format(local_path))
+                    self.download(key, local_path)
+                else:
+                    print os.path.getmtime(local_path), modified_time(key)
             else:
                 info("File up to date {}".format(key.name))
         
@@ -93,7 +108,14 @@ class OpenS3Box:
                 else:
                     info("File up to date {}".format(key_path))
 
-if __name__ == "__main__":
-    opens3box = OpenS3Box("opens3box.conf")
+if __name__ == '__main__':
+    icon = "../resources/icon.ico"
+    hover_text = "OpenS3Box"
+    opens3box = OpenS3Box("../opens3box.conf")        
+    def sync(sysTrayIcon):
+        opens3box.sync()
+    def close(sysTrayIcon):
+        pass
+    menu_options = [('Sync', icon, sync)]
     
-    opens3box.sync()
+    SysTrayIcon(icon, hover_text, menu_options, on_quit=close, default_menu_index=1)
