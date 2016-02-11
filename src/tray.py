@@ -25,7 +25,7 @@ class SysTrayIcon(object):
     def __init__(self,
                  icon,
                  hover_text,
-                 menu_options,
+                 menu_cb,
                  on_quit=None,
                  default_menu_index=None,
                  window_class_name=None,):
@@ -34,14 +34,7 @@ class SysTrayIcon(object):
         self.hover_text = hover_text
         self.on_quit = on_quit
         
-        menu_options = menu_options + [('Quit', None, self.QUIT),]
-        self._next_action_id = self.FIRST_ID
-        self.menu_actions_by_id = set()
-        self.menu_options = self._add_ids_to_menu_options(menu_options)
-        self.menu_actions_by_id = dict(self.menu_actions_by_id)
-        del self._next_action_id
-        
-        
+        self.menu_cb = menu_cb
         self.default_menu_index = (default_menu_index or 0)
         self.window_class_name = window_class_name or "SysTrayIconPy"
         
@@ -138,8 +131,15 @@ class SysTrayIcon(object):
         return True
         
     def show_menu(self):
+        menu_options = self.menu_cb()
+        menu_options = menu_options + [('Quit', None, self.QUIT),]
+        self._next_action_id = self.FIRST_ID
+        self.menu_actions_by_id = set()
+        menu_options = self._add_ids_to_menu_options(menu_options)
+        self.menu_actions_by_id = dict(self.menu_actions_by_id)
+        del self._next_action_id
         menu = win32gui.CreatePopupMenu()
-        self.create_menu(menu, self.menu_options)
+        self.create_menu(menu, menu_options)
         #win32gui.SetMenuDefaultItem(menu, 1000, 0)
         
         pos = win32gui.GetCursorPos()
@@ -173,6 +173,8 @@ class SysTrayIcon(object):
                 win32gui.InsertMenuItem(menu, 0, 1, item)
 
     def prep_menu_icon(self, icon):
+        assert os.path.exists(icon)
+
         # First load the icon.
         ico_x = win32api.GetSystemMetrics(win32con.SM_CXSMICON)
         ico_y = win32api.GetSystemMetrics(win32con.SM_CYSMICON)
@@ -192,8 +194,8 @@ class SysTrayIcon(object):
         win32gui.DrawIconEx(hdcBitmap, 0, 0, hicon, ico_x, ico_y, 0, 0, win32con.DI_NORMAL)
         win32gui.SelectObject(hdcBitmap, hbmOld)
         win32gui.DeleteDC(hdcBitmap)
-        
-        return hbm
+
+        return hbm.Detach()
 
     def command(self, hwnd, msg, wparam, lparam):
         id = win32gui.LOWORD(wparam)

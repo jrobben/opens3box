@@ -4,9 +4,11 @@ import yaml
 import boto
 import time
 import json
+import operator
 from hashlib import md5
 from calendar import timegm
 from IPython import embed
+
 from tray import SysTrayIcon
 
 def error(msg):
@@ -167,10 +169,11 @@ class OpenS3Box:
         self.cache["version"][self._get_cache_key(local_path)] = version
         self.cache["md5"][self._get_cache_key(local_path)] = md5sum(local_path)
 
-        
-    def sync(self):
-        # TODO add caching: md5sum/data modified/...
-        # Download new or modified files
+    def get_most_recent_changes(self):
+        file_mtimes = self.cache["mtime"]
+        return sorted(file_mtimes.items(), key=operator.itemgetter(1))
+
+    def _download_new_files(self):
         info("Checking S3 files")
         for key in self.bucket.list():
             local_path = self.remote_to_local_path(key)
@@ -180,8 +183,8 @@ class OpenS3Box:
                 info("Downloading new file {}".format(local_path))
                 self.download(key, local_path)
         self.write_cache()
-        
-        # Upload new or modified files
+
+    def _check_local_files(self):
         info("Checking local files")
         for root, dirs, files in os.walk(self.local_folder):
             for filename in files:
@@ -213,15 +216,48 @@ class OpenS3Box:
                     info("File up to date {}".format(key_path))
         self.write_cache()
 
+    def _remove_deleted_files(self):
+        info("Removing deleted files")
+        # iterate cache check which files are no longer present
+        # TODO
+        self.write_cache()
+
+    def sync(self):
+        self._download_new_files()
+        self._check_local_files()
+        self._remove_deleted_files()
+        print self.get_most_recent_changes()
+
+    def open_folder(self, folder=None):
+        # TODO linux support
+        folder = folder or self.local_folder
+        print "Open folder", folder
+        os.system("explorer {}".format(folder))
+
+    def create_recently_changed_menu(self):
+        def get_open_file_location_cb(file_path):
+            def f(_):
+                self.open_folder(os.path.dirname(file_path))
+            return f
+        return ((os.path.basename(file_path), None, get_open_file_location_cb(self.local_folder + file_path)) for file_path, _ in self.get_most_recent_changes()[:-10:-1])
+
+    def get_menu_options(self):
+        def sync(_):
+            opens3box.sync()
+        def open_folder(_):
+            opens3box.open_folder()
+
+
+        refresh_icon = "../resources/16x16/view-refresh-3.ico"
+        recent_changes_icon = "../resources/16x16/folder-new-7.ico"
+        open_folder_icon = "../resources/16x16/folder-sync.ico"
+        return [('Sync', refresh_icon, sync), ('Open Folder', open_folder_icon, open_folder), ("Recently Changed", recent_changes_icon, self.create_recently_changed_menu())]
+
 if __name__ == '__main__':
-    icon = "../resources/icon.ico"
+    icon = "../resources/16x16/folder-sync.ico"
     hover_text = "OpenS3Box"
-    opens3box = OpenS3Box()
-    def sync(sysTrayIcon):
-        opens3box.sync()
     def close(sysTrayIcon):
         pass
-    menu_options = [('Sync', icon, sync)]
-    
-    SysTrayIcon(icon, hover_text, menu_options, on_quit=close, default_menu_index=1)
+    opens3box = OpenS3Box()
+    SysTrayIcon(icon, hover_text, menu_cb=opens3box.get_menu_options, on_quit=close, default_menu_index=1)
     opens3box.write_cache()
