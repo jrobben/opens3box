@@ -7,19 +7,39 @@ import json
 import operator
 from hashlib import md5
 from calendar import timegm
+import logging
+from logging.config import fileConfig
+from logging.handlers import RotatingFileHandler
+
 from IPython import embed
 
 from tray import SysTrayIcon
 
+def get_user_folder():
+    # TODO linux support
+    user_folder = os.path.join(os.getenv('USERPROFILE'), ".opens3box")
+    ensure_folder(user_folder)
+    return user_folder
+
+def ensure_folder(folder):
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+
+# Configure logging
+fileConfig('../logging.conf')
+log = logging.getLogger()
+file_handler = RotatingFileHandler(os.path.join(get_user_folder(), "log"), maxBytes=2*1024*1024)
+file_handler.setFormatter(log.handlers[0].formatter)
+log.addHandler(file_handler)
+
 def error(msg):
     # TODO linux support
-    print "ERROR:", msg
+    log.error(msg)
     import win32api
     win32api.MessageBox(0, msg, "Error")
 
 def info(msg):
-    # TODO use logging module
-    print" INFO:", msg
+    log.info(msg)
     
 def fatal_error(msg):
     error(msg)
@@ -34,14 +54,6 @@ def modified_time(key):
         return timegm(time.strptime(key.last_modified, "%a, %d %b %Y %H:%M:%S %Z"))
     except ValueError:
         return timegm(time.strptime(key.last_modified[:19], "%Y-%m-%dT%H:%M:%S"))
-    
-def ensure_folder(folder):
-    if not os.path.exists(folder):  
-        os.makedirs(folder)
-
-def get_user_folder():
-    # TODO linux support
-    return os.path.join(os.getenv('USERPROFILE'), ".opens3box")
 
 class OpenS3Box:
 
@@ -62,7 +74,7 @@ class OpenS3Box:
             fatal_error("Missing configuration {}".format(e.args[0]))
         
         if not os.path.isdir(self.local_folder):
-            print error("{} does not exist".format(self.local_folder))
+            error("{} does not exist".format(self.local_folder))
             
         self.conn = boto.connect_s3(self.aws_key_id, self.aws_key,\
                                     is_secure=True, host=self.aws_host)
@@ -143,6 +155,9 @@ class OpenS3Box:
     def _get_cache_key(self, local_path):
         return local_path.replace(self.local_folder, "")
 
+    def _local_path_from_cache_key(self, key):
+        return self.local_folder + key
+
     def get_local_version(self, local_path):
         try:
             return self.cache["version"][self._get_cache_key(local_path)]
@@ -168,6 +183,17 @@ class OpenS3Box:
         self.cache["mtime"][self._get_cache_key(local_path)] = self.get_local_modified_time(local_path)
         self.cache["version"][self._get_cache_key(local_path)] = version
         self.cache["md5"][self._get_cache_key(local_path)] = md5sum(local_path)
+
+    def remove_from_cache(self, local_path):
+        del self.cache["mtime"][self._get_cache_key(local_path)]
+        del self.cache["version"][self._get_cache_key(local_path)]
+        del self.cache["md5"][self._get_cache_key(local_path)]
+
+    def is_file_in_cache(self, local_path):
+        try:
+            return self.cache["md5"][self._get_cache_key(local_path)] is not None
+        except KeyError:
+            return False
 
     def get_most_recent_changes(self):
         file_mtimes = self.cache["mtime"]
@@ -201,9 +227,14 @@ class OpenS3Box:
                                         and md5sum(local_path) != self.get_cached_md5sum(local_path)
 
                 if key is None:
-                    info("Uploading new file {}".format(key_path))
-                    key = boto.s3.key.Key(self.bucket, key_path)
-                    self.upload(key, local_path, 1)
+                    if self.is_file_in_cache(local_path):
+                        info("File remotely deleted {}".format(local_path))
+                        os.remove(local_path)
+                        self.remove_from_cache(local_path)
+                    else:
+                        info("Uploading new file {}".format(key_path))
+                        key = boto.s3.key.Key(self.bucket, key_path)
+                        self.upload(key, local_path, 1)
                 elif remote_file_changed and local_file_changed:
                     error("{}\nBoth local and remote files have changed.\nRemove local or remote file.".format(local_path))
                 elif local_file_changed:
@@ -219,19 +250,24 @@ class OpenS3Box:
     def _remove_deleted_files(self):
         info("Removing deleted files")
         # iterate cache check which files are no longer present
-        # TODO
+        for cache_key in self.cache["md5"].keys():
+            local_path = self._local_path_from_cache_key(cache_key)
+            if not os.path.isfile(local_path):
+                info("File has been removed: {}".format(local_path))
+                key_path = self.local_to_remote_path(cache_key)
+                key = self.bucket.get_key(key_path)
+                key.delete()
+                self.remove_from_cache(local_path)
         self.write_cache()
 
     def sync(self):
+        self._remove_deleted_files()
         self._download_new_files()
         self._check_local_files()
-        self._remove_deleted_files()
-        print self.get_most_recent_changes()
 
     def open_folder(self, folder=None):
         # TODO linux support
         folder = folder or self.local_folder
-        print "Open folder", folder
         os.system("explorer {}".format(folder))
 
     def create_recently_changed_menu(self):
@@ -239,11 +275,16 @@ class OpenS3Box:
             def f(_):
                 self.open_folder(os.path.dirname(file_path))
             return f
-        return ((os.path.basename(file_path), None, get_open_file_location_cb(self.local_folder + file_path)) for file_path, _ in self.get_most_recent_changes()[:-10:-1])
+        return [(os.path.basename(file_path), None, get_open_file_location_cb(self.local_folder + file_path)) for file_path, _ in self.get_most_recent_changes()[:-10:-1]]
 
     def get_menu_options(self):
-        def sync(_):
+        def sync(tray):
+            tray.icon = refresh_icon
+            tray.refresh_icon()
             opens3box.sync()
+            tray.icon = open_folder_icon
+            tray.refresh_icon()
+
         def open_folder(_):
             opens3box.open_folder()
 
@@ -251,7 +292,10 @@ class OpenS3Box:
         refresh_icon = "../resources/16x16/view-refresh-3.ico"
         recent_changes_icon = "../resources/16x16/folder-new-7.ico"
         open_folder_icon = "../resources/16x16/folder-sync.ico"
-        return [('Sync', refresh_icon, sync), ('Open Folder', open_folder_icon, open_folder), ("Recently Changed", recent_changes_icon, self.create_recently_changed_menu())]
+        recently_changed_menu = self.create_recently_changed_menu()
+        if len(recently_changed_menu) > 1:
+            return [('Sync', refresh_icon, sync), ('Open Folder', open_folder_icon, open_folder), ("Recently Changed", recent_changes_icon, recently_changed_menu)]
+        return [('Sync', refresh_icon, sync), ('Open Folder', open_folder_icon, open_folder)]
 
 if __name__ == '__main__':
     icon = "../resources/16x16/folder-sync.ico"

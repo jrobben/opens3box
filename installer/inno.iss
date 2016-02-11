@@ -39,6 +39,7 @@ Source: "{#MyDevFolder}\dist\opens3box.exe"; DestDir: "{app}\dist"; Flags: ignor
 Source: "{#MyDevFolder}\dist\*"; DestDir: "{app}\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MyDevFolder}\resources\16x16\*"; DestDir: "{app}\resources\16x16"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MyDevFolder}\opens3box.conf.in"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyDevFolder}\logging.conf"; DestDir: "{app}"; Flags: ignoreversion
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]

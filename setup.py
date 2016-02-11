@@ -12,7 +12,7 @@ for site_path in site.getsitepackages():
     if os.path.isdir(pywin32_path):
         os.environ["PATH"] = os.environ["PATH"] + ";" + pywin32_path
 
-setup(console=['src/opens3box.py'],
+setup(windows=['src/opens3box.py'],
 options={
 'py2exe': {'includes': ['tray']},
 }   
